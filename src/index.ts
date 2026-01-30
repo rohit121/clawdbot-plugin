@@ -88,8 +88,10 @@ export default function register(api: any) {
 
   // Helper to register agent
   const registerAgent = async () => {
+    // Use configured name, or fallback to 'clawdbot'
+    const agentName = cfg.agentName || 'clawdbot';
     const result = await sendToAgentDog(endpoint, apiKey, '/agents/register', {
-      name: api.config?.agents?.defaults?.workspace || 'clawdbot',
+      name: agentName,
       type: 'clawdbot',
       metadata: {
         workspace: api.config?.agents?.defaults?.workspace,
