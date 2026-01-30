@@ -1,0 +1,40 @@
+{
+  "id": "agentdog",
+  "name": "AgentDog",
+  "description": "Monitor your AI agent with AgentDog - real-time observability",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "description": "Your AgentDog API key (starts with ad_)"
+      },
+      "endpoint": {
+        "type": "string",
+        "default": "https://agentdog.io/api/v1",
+        "description": "AgentDog API endpoint"
+      },
+      "syncInterval": {
+        "type": "number",
+        "default": 300,
+        "description": "Metadata sync interval in seconds"
+      }
+    },
+    "required": ["apiKey"]
+  },
+  "uiHints": {
+    "apiKey": {
+      "label": "API Key",
+      "placeholder": "ad_xxxxxxxxxxxxx",
+      "sensitive": true
+    },
+    "endpoint": {
+      "label": "API Endpoint"
+    },
+    "syncInterval": {
+      "label": "Sync Interval (seconds)"
+    }
+  }
+}
