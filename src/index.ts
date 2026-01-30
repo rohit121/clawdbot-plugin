@@ -199,7 +199,13 @@ export default function register(api: any) {
     }, syncInterval);
   });
 
-  // 2. Clean up on shutdown
+  // 2. Sync on heartbeat
+  api.on('heartbeat', async () => {
+    api.logger?.info?.('[agentdog] Heartbeat sync');
+    await syncConfig();
+  });
+
+  // 3. Clean up on shutdown
   api.on('gateway_stop', async () => {
     api.logger?.info?.('[agentdog] Gateway stopping');
     if (syncIntervalId) {
@@ -208,7 +214,7 @@ export default function register(api: any) {
     }
   });
 
-  // 3. Track messages
+  // 4. Track messages
   api.on('message_received', async (event: any) => {
     await sendEvent('message', event.sessionKey, {
       role: 'user',
@@ -223,7 +229,7 @@ export default function register(api: any) {
     });
   });
 
-  // 4. Track tool calls
+  // 5. Track tool calls
   api.on('after_tool_call', async (event: any) => {
     // Track errors
     if (event.isError) {
@@ -244,7 +250,7 @@ export default function register(api: any) {
     });
   });
 
-  // 5. Track usage after conversations
+  // 6. Track usage after conversations
   api.on('agent_end', async (event: any) => {
     if (event.usage) {
       await sendEvent('usage', event.sessionKey, {
@@ -264,4 +270,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.3.0';
+export const version = '0.3.1';
