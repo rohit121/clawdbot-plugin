@@ -1,65 +1,84 @@
-# 🐕 AgentDog - Clawdbot Plugin
+# AgentDog Plugin for Clawdbot
 
-Monitor your Clawdbot agent with AgentDog - real-time observability for AI agents.
+Observability plugin that sends data to [AgentDog](https://agentdog.io).
+
+## Features
+
+- **Agent registration** — Auto-registers your Clawdbot instance
+- **Config sync** — Syncs channels, plugins, settings (no secrets)
+- **Event tracking** — Messages, tool calls, usage
+- **Cost tracking** — Token usage and costs per model
+
+## Config Sync Triggers
+
+1. **On startup** — When gateway starts
+2. **After conversations** — On `agent_end` hook
+3. **Periodic backup** — Every 24h (configurable)
 
 ## Installation
 
 ```bash
-clawdbot plugins install agentdog-clawdbot
+# From npm (when published)
+clawdbot plugins install agentdog
+
+# Or link locally for development
+cd /root/agentdog-clawdbot
+npm install && npm run build
+npm link
+clawdbot plugins link agentdog-clawdbot
 ```
 
 ## Configuration
 
-1. Get your API key at https://agentdog.io
-2. Add to your `clawdbot.json`:
+Add to your Clawdbot config:
 
-```json
-{
-  "plugins": {
-    "entries": {
-      "agentdog": {
-        "enabled": true,
-        "config": {
-          "apiKey": "ad_your_key_here"
-        }
-      }
-    }
-  }
-}
+```yaml
+plugins:
+  entries:
+    agentdog:
+      enabled: true
+      config:
+        apiKey: "ad_your_api_key_here"
+        # Optional:
+        endpoint: "https://agentdog.io/api/v1"  # default
+        syncInterval: 86400  # seconds (default: 24h)
 ```
 
-3. Restart the gateway:
+## What Gets Synced
 
-```bash
-clawdbot gateway restart
-```
+### Config (no secrets)
+- Workspace name
+- Channel names + policies (not tokens)
+- Plugin names (not configs)
+- Agent settings (model, thinking, heartbeat)
+- Clawdbot version
 
-## Config Options
+### Events
+- Messages (user/assistant)
+- Tool calls (name, success/error)
+- Usage (tokens, costs, model)
 
-| Option | Required | Default | Description |
-|--------|----------|---------|-------------|
-| `apiKey` | Yes | - | Your AgentDog API key |
-| `endpoint` | No | `https://agentdog.io/api/v1` | API endpoint |
-| `syncInterval` | No | `300` | Metadata sync interval (seconds) |
+## API Endpoints Used
 
-## What's Tracked
-
-- 💬 **Messages** - User inputs and assistant responses
-- 🔧 **Tool calls** - Every tool invocation with results
-- 📊 **Usage** - Token counts and costs
-- ⚙️ **Config** - Channels, models, workspace
-
-## Dashboard
-
-View your agent at https://agentdog.io
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /agents/register` | Register agent on startup |
+| `POST /agents/{id}/config` | Sync config |
+| `POST /events` | Send events |
+| `POST /agents/{id}/heartbeat` | Heartbeat (optional) |
 
 ## Development
 
 ```bash
-git clone https://github.com/rohit121/agentdog-clawdbot.git
-cd agentdog-clawdbot
-npm install
+# Build
 npm run build
+
+# Watch mode
+npm run dev
+
+# Test locally
+clawdbot plugins link agentdog-clawdbot
+clawdbot gateway restart
 ```
 
 ## License

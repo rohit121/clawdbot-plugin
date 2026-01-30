@@ -1,44 +1,31 @@
 /**
  * AgentDog Plugin for Clawdbot
  * 
- * Sends events to AgentDog for observability and monitoring.
+ * Sends observability data to AgentDog.
+ * 
+ * Config sync triggers:
+ * 1. On startup (gateway_start hook)
+ * 2. After conversations (agent_end hook) 
+ * 3. Periodic backup (every 24h by default)
  */
-
-interface PluginConfig {
-  apiKey: string;
-  endpoint?: string;
-  syncInterval?: number;
-}
-
-interface PluginAPI {
-  config: any;
-  logger: {
-    info: (msg: string) => void;
-    warn: (msg: string) => void;
-    error: (msg: string) => void;
-  };
-  registerHook?: (event: string, handler: (ctx: any) => Promise<void>) => void;
-}
 
 // Plugin state
 let agentId: string | null = null;
-let pluginConfig: PluginConfig = { apiKey: '' };
 let endpoint = 'https://agentdog.io/api/v1';
+let apiKey = '';
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Send data to AgentDog API
  */
 async function sendToAgentDog(path: string, data: Record<string, unknown>): Promise<unknown> {
-  if (!pluginConfig.apiKey) {
-    return null;
-  }
+  if (!apiKey) return null;
 
   try {
     const response = await fetch(`${endpoint}${path}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${pluginConfig.apiKey}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),
@@ -61,7 +48,7 @@ async function sendToAgentDog(path: string, data: Record<string, unknown>): Prom
  */
 async function registerAgent(config: any): Promise<void> {
   const result = await sendToAgentDog('/agents/register', {
-    name: 'clawdbot',
+    name: config?.agents?.defaults?.workspace || 'clawdbot',
     type: 'clawdbot',
     metadata: {
       workspace: config?.agents?.defaults?.workspace,
@@ -90,27 +77,6 @@ async function sendEvent(type: string, sessionId: string | undefined, data: Reco
 }
 
 /**
- * Strip sensitive fields from an object
- */
-function stripSensitive(obj: any, sensitiveKeys: string[] = ['apiKey', 'token', 'botToken', 'secret', 'password', 'key']): any {
-  if (!obj || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(item => stripSensitive(item, sensitiveKeys));
-  
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const isSecret = sensitiveKeys.some(sk => key.toLowerCase().includes(sk.toLowerCase()));
-    if (isSecret) {
-      result[key] = '[REDACTED]';
-    } else if (typeof value === 'object' && value !== null) {
-      result[key] = stripSensitive(value, sensitiveKeys);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-/**
  * Extract safe channel info (no tokens)
  */
 function getSafeChannels(channels: any): Record<string, unknown> {
@@ -128,18 +94,6 @@ function getSafeChannels(channels: any): Record<string, unknown> {
 }
 
 /**
- * Extract safe auth profiles (provider names only)
- */
-function getSafeAuthProfiles(auth: any): Array<{name: string; provider: string; mode: string}> {
-  if (!auth?.profiles) return [];
-  return Object.entries(auth.profiles).map(([key, value]: [string, any]) => ({
-    name: key,
-    provider: value?.provider ?? '',
-    mode: value?.mode ?? '',
-  }));
-}
-
-/**
  * Extract plugin names (no configs)
  */
 function getPluginNames(plugins: any): string[] {
@@ -150,11 +104,13 @@ function getPluginNames(plugins: any): string[] {
 }
 
 /**
- * Sync metadata
+ * Sync config to AgentDog
  */
-async function syncMetadata(config: any): Promise<void> {
+async function syncConfig(config: any): Promise<void> {
   if (!agentId) return;
 
+  console.log('[agentdog] Syncing config...');
+  
   await sendToAgentDog(`/agents/${agentId}/config`, {
     // Meta
     version: config?.meta?.lastTouchedVersion,
@@ -165,9 +121,6 @@ async function syncMetadata(config: any): Promise<void> {
     // Channels (safe - no tokens)
     channels: getSafeChannels(config?.channels),
     
-    // Auth profiles (names only)
-    authProfiles: getSafeAuthProfiles(config?.auth),
-    
     // Plugins (names only)
     plugins: getPluginNames(config?.plugins),
     
@@ -175,93 +128,117 @@ async function syncMetadata(config: any): Promise<void> {
     gateway: {
       port: config?.gateway?.port,
       mode: config?.gateway?.mode,
-      bind: config?.gateway?.bind,
     },
     
     // Agent settings
     agents: {
+      model: config?.agents?.defaults?.model,
       heartbeat: config?.agents?.defaults?.heartbeat,
       compaction: config?.agents?.defaults?.compaction,
-      maxConcurrent: config?.agents?.defaults?.maxConcurrent,
-      memorySearch: config?.agents?.defaults?.memorySearch?.enabled ?? false,
+      thinking: config?.agents?.defaults?.thinking,
     },
   });
+  
+  console.log('[agentdog] Config synced');
 }
 
 /**
- * Plugin registration function
+ * Plugin definition using Clawdbot Plugin API
  */
-export default function register(api: PluginAPI) {
-  // Get plugin config
-  const entries = api.config?.plugins?.entries?.agentdog;
-  pluginConfig = entries?.config || {};
-  endpoint = pluginConfig.endpoint || 'https://agentdog.io/api/v1';
+const plugin = {
+  id: 'agentdog',
+  name: 'AgentDog Observability',
+  description: 'Send observability data to AgentDog (agentdog.io)',
+  version: '0.2.0',
+  
+  configSchema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string', description: 'AgentDog API key' },
+      endpoint: { type: 'string', description: 'API endpoint (default: https://agentdog.io/api/v1)' },
+      syncInterval: { type: 'number', description: 'Config sync interval in seconds (default: 86400 = 24h)' },
+    },
+    required: ['apiKey'],
+  },
 
-  if (!pluginConfig.apiKey) {
-    console.warn('[agentdog] No API key configured. Set plugins.entries.agentdog.config.apiKey');
-    return;
-  }
+  register(api: any) {
+    // Get plugin config
+    const pluginConfig = api.config?.plugins?.entries?.agentdog?.config || {};
+    apiKey = pluginConfig.apiKey || '';
+    endpoint = pluginConfig.endpoint || 'https://agentdog.io/api/v1';
+    const syncInterval = (pluginConfig.syncInterval || 86400) * 1000; // Default 24h
 
-  console.log('[agentdog] Starting AgentDog plugin...');
+    if (!apiKey) {
+      console.warn('[agentdog] No API key configured. Set plugins.entries.agentdog.config.apiKey');
+      return;
+    }
 
-  // Register agent on startup
-  registerAgent(api.config).then(() => {
-    // Initial sync
-    syncMetadata(api.config);
-    
-    // Periodic sync
-    const interval = (pluginConfig.syncInterval || 300) * 1000;
-    syncIntervalId = setInterval(() => {
-      syncMetadata(api.config);
-    }, interval);
-  });
+    console.log('[agentdog] Initializing...');
 
-  // Register hooks if available
-  if (api.registerHook) {
-    api.registerHook('message_received', async (ctx) => {
-      await sendEvent('message', ctx.sessionId, {
+    // 1. Sync on startup
+    api.on('gateway_start', async () => {
+      console.log('[agentdog] Gateway started, registering and syncing...');
+      await registerAgent(api.config);
+      await syncConfig(api.config);
+      
+      // Set up periodic sync (backup)
+      if (syncIntervalId) clearInterval(syncIntervalId);
+      syncIntervalId = setInterval(() => {
+        syncConfig(api.config);
+      }, syncInterval);
+    });
+
+    // 2. Clean up on shutdown
+    api.on('gateway_stop', async () => {
+      console.log('[agentdog] Gateway stopping, cleaning up...');
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+        syncIntervalId = null;
+      }
+    });
+
+    // 3. Track messages
+    api.on('message_received', async (event: any) => {
+      await sendEvent('message', event.sessionKey, {
         role: 'user',
-        content: ctx.message?.content || ctx.text,
-        channel: ctx.channel,
+        content: event.text || event.message?.content,
+        channel: event.channel,
       });
     });
 
-    api.registerHook('message_sent', async (ctx) => {
-      await sendEvent('message', ctx.sessionId, {
+    api.on('message_sent', async (event: any) => {
+      await sendEvent('message', event.sessionKey, {
         role: 'assistant',
-        content: ctx.message?.content || ctx.text,
-        provider: ctx.provider,
-        model: ctx.model,
+        content: event.text || event.message?.content,
+        model: event.model,
       });
     });
 
-    api.registerHook('after_tool_call', async (ctx) => {
-      await sendEvent('tool_call', ctx.sessionId, {
-        name: ctx.toolName,
-        arguments: ctx.arguments,
-        result: ctx.result,
-        is_error: ctx.isError,
+    // 4. Track tool calls
+    api.on('after_tool_call', async (event: any) => {
+      await sendEvent('tool_call', event.sessionKey, {
+        name: event.toolName,
+        arguments: event.arguments,
+        is_error: event.isError,
       });
     });
 
-    api.registerHook('agent_end', async (ctx) => {
-      if (ctx.usage) {
-        await sendEvent('usage', ctx.sessionId, {
-          input_tokens: ctx.usage.input,
-          output_tokens: ctx.usage.output,
-          total_tokens: ctx.usage.totalTokens,
-          total_cost: ctx.usage.cost?.total,
-          provider: ctx.provider,
-          model: ctx.model,
+    // 5. Track usage after conversations
+    api.on('agent_end', async (event: any) => {
+      if (event.usage) {
+        await sendEvent('usage', event.sessionKey, {
+          input_tokens: event.usage.input,
+          output_tokens: event.usage.output,
+          total_tokens: event.usage.totalTokens,
+          total_cost: event.usage.cost?.total,
+          provider: event.provider,
+          model: event.model,
         });
       }
     });
-  }
 
-  console.log('[agentdog] Plugin initialized');
-}
+    console.log('[agentdog] Plugin initialized');
+  },
+};
 
-// Export plugin metadata
-export const id = 'agentdog';
-export const name = 'AgentDog';
-export const version = '0.1.0';
+export default plugin;
