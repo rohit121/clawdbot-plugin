@@ -90,15 +90,101 @@ async function sendEvent(type: string, sessionId: string | undefined, data: Reco
 }
 
 /**
+ * Strip sensitive fields from an object
+ */
+function stripSensitive(obj: any, sensitiveKeys: string[] = ['apiKey', 'token', 'botToken', 'secret', 'password', 'key']): any {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(item => stripSensitive(item, sensitiveKeys));
+  
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const isSecret = sensitiveKeys.some(sk => key.toLowerCase().includes(sk.toLowerCase()));
+    if (isSecret) {
+      result[key] = '[REDACTED]';
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = stripSensitive(value, sensitiveKeys);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Extract safe channel info (no tokens)
+ */
+function getSafeChannels(channels: any): Record<string, unknown> {
+  if (!channels) return {};
+  const safe: Record<string, unknown> = {};
+  for (const [name, config] of Object.entries(channels as Record<string, any>)) {
+    safe[name] = {
+      enabled: config?.enabled ?? true,
+      dmPolicy: config?.dmPolicy,
+      groupPolicy: config?.groupPolicy,
+      streamMode: config?.streamMode,
+    };
+  }
+  return safe;
+}
+
+/**
+ * Extract safe auth profiles (provider names only)
+ */
+function getSafeAuthProfiles(auth: any): Array<{name: string; provider: string; mode: string}> {
+  if (!auth?.profiles) return [];
+  return Object.entries(auth.profiles).map(([key, value]: [string, any]) => ({
+    name: key,
+    provider: value?.provider ?? '',
+    mode: value?.mode ?? '',
+  }));
+}
+
+/**
+ * Extract plugin names (no configs)
+ */
+function getPluginNames(plugins: any): string[] {
+  if (!plugins?.entries) return [];
+  return Object.entries(plugins.entries)
+    .filter(([_, config]: [string, any]) => config?.enabled !== false)
+    .map(([name]) => name);
+}
+
+/**
  * Sync metadata
  */
 async function syncMetadata(config: any): Promise<void> {
   if (!agentId) return;
 
   await sendToAgentDog(`/agents/${agentId}/config`, {
-    channels: config?.channels,
-    model: config?.agents?.defaults?.model,
+    // Meta
+    version: config?.meta?.lastTouchedVersion,
+    
+    // Workspace
     workspace: config?.agents?.defaults?.workspace,
+    
+    // Channels (safe - no tokens)
+    channels: getSafeChannels(config?.channels),
+    
+    // Auth profiles (names only)
+    authProfiles: getSafeAuthProfiles(config?.auth),
+    
+    // Plugins (names only)
+    plugins: getPluginNames(config?.plugins),
+    
+    // Gateway (no secrets)
+    gateway: {
+      port: config?.gateway?.port,
+      mode: config?.gateway?.mode,
+      bind: config?.gateway?.bind,
+    },
+    
+    // Agent settings
+    agents: {
+      heartbeat: config?.agents?.defaults?.heartbeat,
+      compaction: config?.agents?.defaults?.compaction,
+      maxConcurrent: config?.agents?.defaults?.maxConcurrent,
+      memorySearch: config?.agents?.defaults?.memorySearch?.enabled ?? false,
+    },
   });
 }
 
