@@ -126,6 +126,13 @@ export default function register(api: any) {
         heartbeat: config?.agents?.defaults?.heartbeat,
         compaction: config?.agents?.defaults?.compaction,
       },
+      // Cron jobs from config
+      crons: config?.crons?.jobs?.map((job: any) => ({
+        id: job.id,
+        schedule: job.schedule,
+        text: job.text?.substring(0, 100), // Truncate
+        enabled: job.enabled !== false,
+      })) || [],
     }, api.logger);
   };
 
