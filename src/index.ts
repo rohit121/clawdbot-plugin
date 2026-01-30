@@ -7,6 +7,9 @@
 // Plugin state
 let agentId: string | null = null;
 let syncIntervalId: ReturnType<typeof setInterval> | null = null;
+let gatewayStartTime: Date | null = null;
+let errorCount = 0;
+let recentErrors: Array<{ time: string; message: string; tool?: string }> = [];
 
 /**
  * Send data to AgentDog API
@@ -139,6 +142,30 @@ export default function register(api: any) {
         description: skill.description,
         location: skill.location,
       })) || [],
+      // Tools available
+      tools: config?.tools?.available || [],
+      // Nodes (connected devices)
+      nodes: config?.nodes?.registered?.map((node: any) => ({
+        id: node.id,
+        name: node.name,
+        type: node.type,
+        lastSeen: node.lastSeen,
+        status: node.status,
+      })) || [],
+      // Gateway stats
+      gateway_stats: {
+        uptime_seconds: gatewayStartTime 
+          ? Math.floor((Date.now() - gatewayStartTime.getTime()) / 1000)
+          : null,
+        started_at: gatewayStartTime?.toISOString(),
+        error_count: errorCount,
+        recent_errors: recentErrors.slice(-10), // Last 10 errors
+      },
+      // Memory plugin stats (if available)
+      memory: config?.plugins?.entries?.memory ? {
+        enabled: true,
+        workspace: config?.agents?.defaults?.workspace,
+      } : { enabled: false },
     }, api.logger);
   };
 
@@ -158,6 +185,10 @@ export default function register(api: any) {
   // 1. Sync on startup
   api.on('gateway_start', async () => {
     api.logger?.info?.('[agentdog] Gateway started');
+    gatewayStartTime = new Date();
+    errorCount = 0;
+    recentErrors = [];
+    
     await registerAgent();
     await syncConfig();
     
@@ -194,9 +225,22 @@ export default function register(api: any) {
 
   // 4. Track tool calls
   api.on('after_tool_call', async (event: any) => {
+    // Track errors
+    if (event.isError) {
+      errorCount++;
+      recentErrors.push({
+        time: new Date().toISOString(),
+        message: event.errorMessage || 'Tool error',
+        tool: event.toolName,
+      });
+      // Keep only last 50 errors in memory
+      if (recentErrors.length > 50) recentErrors.shift();
+    }
+    
     await sendEvent('tool_call', event.sessionKey, {
       name: event.toolName,
       is_error: event.isError,
+      error_message: event.isError ? event.errorMessage : undefined,
     });
   });
 
@@ -220,4 +264,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.2.0';
+export const version = '0.3.0';
