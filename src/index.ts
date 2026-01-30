@@ -133,6 +133,12 @@ export default function register(api: any) {
         text: job.text?.substring(0, 100), // Truncate
         enabled: job.enabled !== false,
       })) || [],
+      // Skills
+      skills: config?.skills?.available?.map((skill: any) => ({
+        name: skill.name,
+        description: skill.description,
+        location: skill.location,
+      })) || [],
     }, api.logger);
   };
 
