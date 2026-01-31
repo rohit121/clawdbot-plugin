@@ -82,8 +82,14 @@ export default function register(api: any) {
   const endpoint = cfg.endpoint || 'https://agentdog.io/api/v1';
   const syncInterval = (cfg.syncInterval || 86400) * 1000; // Default 24h
 
+  // Validate API key
   if (!apiKey) {
-    api.logger?.warn?.('[agentdog] No API key configured');
+    api.logger?.error?.('[agentdog] No API key configured - plugin disabled');
+    return;
+  }
+
+  if (!apiKey.startsWith('ad_')) {
+    api.logger?.error?.('[agentdog] Invalid API key format - must start with "ad_"');
     return;
   }
 
@@ -270,4 +276,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.3.1';
+export const version = '0.4.0';
