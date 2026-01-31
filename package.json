@@ -23,10 +23,10 @@
   "homepage": "https://agentdog.io",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agentdog-io/clawdbot-plugin.git"
+    "url": "https://github.com/rohit121/clawdbot-plugin.git"
   },
   "bugs": {
-    "url": "https://github.com/agentdog-io/clawdbot-plugin/issues"
+    "url": "https://github.com/rohit121/clawdbot-plugin/issues"
   },
   "devDependencies": {
     "typescript": "^5.3.0",
