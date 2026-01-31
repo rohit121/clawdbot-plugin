@@ -1,36 +1,38 @@
 # AgentDog Plugin for Clawdbot
 
-Observability plugin that sends data to [AgentDog](https://agentdog.io).
+[![npm version](https://badge.fury.io/js/@agentdog%2Fclawdbot.svg)](https://www.npmjs.com/package/@agentdog/clawdbot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Monitor your [Clawdbot](https://clawd.bot) AI agents with [AgentDog](https://agentdog.io) observability.
 
 ## Features
 
-- **Agent registration** — Auto-registers your Clawdbot instance
-- **Config sync** — Syncs channels, plugins, settings (no secrets)
-- **Event tracking** — Messages, tool calls, usage
-- **Cost tracking** — Token usage and costs per model
-
-## Config Sync Triggers
-
-1. **On startup** — When gateway starts
-2. **After conversations** — On `agent_end` hook
-3. **Periodic backup** — Every 24h (configurable)
+- 📊 **Config Sync** — Channels, plugins, skills, crons, nodes
+- 💬 **Message Tracking** — User and assistant messages
+- 🔧 **Tool Monitoring** — Tool calls with error tracking
+- 💰 **Usage & Costs** — Token counts and cost tracking
+- ⏱️ **Gateway Stats** — Uptime, errors, health metrics
+- 🔄 **Auto Sync** — On startup, heartbeat, and periodic intervals
 
 ## Installation
 
 ```bash
-# From npm (when published)
-clawdbot plugins install agentdog
+# Using npm
+npm install @agentdog/clawdbot
 
-# Or link locally for development
-cd /root/agentdog-clawdbot
-npm install && npm run build
-npm link
-clawdbot plugins link agentdog-clawdbot
+# Using pnpm
+pnpm add @agentdog/clawdbot
+```
+
+Or install directly via Clawdbot:
+
+```bash
+clawdbot plugins install @agentdog/clawdbot
 ```
 
 ## Configuration
 
-Add to your Clawdbot config:
+Add to your Clawdbot config (`clawdbot.yaml` or `clawdbot.json`):
 
 ```yaml
 plugins:
@@ -39,48 +41,75 @@ plugins:
       enabled: true
       config:
         apiKey: "ad_your_api_key_here"
-        # Optional:
-        endpoint: "https://agentdog.io/api/v1"  # default
-        syncInterval: 86400  # seconds (default: 24h)
+        endpoint: "https://agentdog.io/api/v1"  # optional, this is default
+        agentName: "my-agent"  # optional, defaults to 'clawdbot'
+        syncInterval: 86400    # optional, seconds between syncs (default: 24h)
 ```
 
-## What Gets Synced
+## Getting an API Key
 
-### Config (no secrets)
-- Workspace name
-- Channel names + policies (not tokens)
-- Plugin names (not configs)
-- Agent settings (model, thinking, heartbeat)
-- Clawdbot version
+1. Sign up at [agentdog.io](https://agentdog.io)
+2. Go to Settings → API Keys
+3. Create a new key
+4. Add it to your Clawdbot config
 
-### Events
-- Messages (user/assistant)
-- Tool calls (name, success/error)
-- Usage (tokens, costs, model)
+## What Data is Sent?
 
-## API Endpoints Used
+The plugin sends observability data to help you monitor your agent:
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /agents/register` | Register agent on startup |
-| `POST /agents/{id}/config` | Sync config |
-| `POST /events` | Send events |
-| `POST /agents/{id}/heartbeat` | Heartbeat (optional) |
+| Data Type | Description |
+|-----------|-------------|
+| **Config** | Enabled channels, plugins, skills, crons (no secrets) |
+| **Messages** | Message role (user/assistant), channel, model used |
+| **Tool Calls** | Tool name, success/error status |
+| **Usage** | Token counts, cost estimates |
+| **Gateway Stats** | Uptime, error counts |
+
+**We never send:**
+- API keys or secrets
+- Message content
+- Personal data
+- File contents
+
+## Sync Schedule
+
+- **On startup** — Immediate sync when gateway starts
+- **On heartbeat** — Syncs on each Clawdbot heartbeat
+- **Periodic** — Every 24h (configurable via `syncInterval`)
 
 ## Development
 
 ```bash
+# Clone the repo
+git clone https://github.com/agentdog-io/clawdbot-plugin.git
+cd clawdbot-plugin
+
+# Install dependencies
+npm install
+
 # Build
 npm run build
 
 # Watch mode
 npm run dev
+```
 
-# Test locally
-clawdbot plugins link agentdog-clawdbot
-clawdbot gateway restart
+## Manual Installation
+
+Copy the built plugin to your Clawdbot extensions folder:
+
+```bash
+npm run build
+cp dist/* ~/.clawdbot/extensions/agentdog/
 ```
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)
+
+## Links
+
+- [AgentDog Dashboard](https://agentdog.io)
+- [Clawdbot](https://clawd.bot)
+- [Documentation](https://docs.agentdog.io)
+- [Report Issues](https://github.com/agentdog-io/clawdbot-plugin/issues)
