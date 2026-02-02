@@ -239,8 +239,8 @@ export default function register(api) {
     });
     // 4. Track messages
     api.on('message_received', async (event) => {
-        // New user message = new trace (clear any previous)
-        clearTraceId(event.sessionKey);
+        // Get or create trace - don't clear here, clear on agent_end
+        // This keeps rapid user messages in the same trace as their tool calls
         const traceId = getOrCreateTraceId(event.sessionKey);
         await sendEvent('message', event.sessionKey, {
             trace_id: traceId,
@@ -421,4 +421,4 @@ export default function register(api) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = "0.9.0";
+export const version = "0.10.0";
