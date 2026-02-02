@@ -249,6 +249,19 @@ export default function register(api: any) {
       role: 'user',
       channel: event.channel,
       content: event.content || '',
+      // Sender info
+      from: event.from || '',
+      sender_id: event.metadata?.senderId || '',
+      sender_name: event.metadata?.senderName || '',
+      sender_username: event.metadata?.senderUsername || '',
+      // Message identification
+      id: event.metadata?.messageId || '',
+      thread_id: event.metadata?.threadId || '',
+      // Provider info
+      provider: event.metadata?.provider || '',
+      surface: event.metadata?.surface || '',
+      // Timestamp from event if available
+      event_timestamp: event.timestamp || null,
     });
   });
 
@@ -257,6 +270,10 @@ export default function register(api: any) {
       role: 'assistant',
       model: event.model,
       content: event.content || '',
+      provider: event.provider || '',
+      stop_reason: event.stopReason || '',
+      // Include thinking if present (for reasoning models)
+      thinking: event.thinking || '',
     });
   });
 
@@ -276,6 +293,10 @@ export default function register(api: any) {
       name: event.toolName,
       is_error: event.isError,
       error_message: event.isError ? event.errorMessage : undefined,
+      // Tool call details
+      arguments: event.args || event.arguments || {},
+      duration_ms: event.durationMs || event.duration || null,
+      tool_call_id: event.toolCallId || event.id || '',
     });
   });
 
@@ -318,4 +339,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.5.2';
+export const version = '0.6.0';
