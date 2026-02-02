@@ -248,6 +248,7 @@ export default function register(api: any) {
     await sendEvent('message', event.sessionKey, {
       role: 'user',
       channel: event.channel,
+      content: event.content || '',
     });
   });
 
@@ -255,6 +256,7 @@ export default function register(api: any) {
     await sendEvent('message', event.sessionKey, {
       role: 'assistant',
       model: event.model,
+      content: event.content || '',
     });
   });
 
@@ -316,4 +318,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.5.1';
+export const version = '0.5.2';
