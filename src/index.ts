@@ -13,6 +13,29 @@ let recentErrors: Array<{ time: string; message: string; tool?: string }> = [];
 let registrationAttempts = 0;
 const MAX_REGISTRATION_ATTEMPTS = 3;
 
+// Trace tracking - maps sessionKey to current traceId
+// Traces group related events: user message → tool calls → assistant response
+const sessionTraces = new Map<string, string>();
+
+function generateTraceId(): string {
+  return 'tr_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9);
+}
+
+function getOrCreateTraceId(sessionKey: string | undefined): string {
+  const key = sessionKey || 'default';
+  let traceId = sessionTraces.get(key);
+  if (!traceId) {
+    traceId = generateTraceId();
+    sessionTraces.set(key, traceId);
+  }
+  return traceId;
+}
+
+function clearTraceId(sessionKey: string | undefined): void {
+  const key = sessionKey || 'default';
+  sessionTraces.delete(key);
+}
+
 /**
  * Send data to AgentDog API
  */
@@ -245,7 +268,12 @@ export default function register(api: any) {
 
   // 4. Track messages
   api.on('message_received', async (event: any) => {
+    // New user message = new trace (clear any previous)
+    clearTraceId(event.sessionKey);
+    const traceId = getOrCreateTraceId(event.sessionKey);
+    
     await sendEvent('message', event.sessionKey, {
+      trace_id: traceId,
       role: 'user',
       channel: event.channel,
       content: event.content || '',
@@ -266,7 +294,10 @@ export default function register(api: any) {
   });
 
   api.on('message_sent', async (event: any) => {
+    const traceId = getOrCreateTraceId(event.sessionKey);
+    
     await sendEvent('message', event.sessionKey, {
+      trace_id: traceId,
       role: 'assistant',
       model: event.model,
       content: event.content || '',
@@ -279,6 +310,9 @@ export default function register(api: any) {
 
   // 5. Track tool calls
   api.on('after_tool_call', async (event: any) => {
+    // Get or create trace (creates new one for cron jobs that start with tool calls)
+    const traceId = getOrCreateTraceId(event.sessionKey);
+    
     if (event.isError) {
       errorCount++;
       recentErrors.push({
@@ -290,6 +324,7 @@ export default function register(api: any) {
     }
     
     await sendEvent('tool_call', event.sessionKey, {
+      trace_id: traceId,
       name: event.toolName,
       is_error: event.isError,
       error_message: event.isError ? event.errorMessage : undefined,
@@ -302,8 +337,11 @@ export default function register(api: any) {
 
   // 6. Track usage after conversations
   api.on('agent_end', async (event: any) => {
+    const traceId = getOrCreateTraceId(event.sessionKey);
+    
     if (event.usage) {
       await sendEvent('usage', event.sessionKey, {
+        trace_id: traceId,
         input_tokens: event.usage.input,
         output_tokens: event.usage.output,
         total_tokens: event.usage.totalTokens,
@@ -312,6 +350,9 @@ export default function register(api: any) {
         model: event.model,
       });
     }
+    
+    // Turn complete - clear trace
+    clearTraceId(event.sessionKey);
   });
 
   // 7. Initial registration attempt (don't wait for gateway_start)
@@ -339,4 +380,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.6.0';
+export const version = '0.7.0';
