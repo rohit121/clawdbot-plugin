@@ -10,6 +10,8 @@ let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 let gatewayStartTime: Date | null = null;
 let errorCount = 0;
 let recentErrors: Array<{ time: string; message: string; tool?: string }> = [];
+let registrationAttempts = 0;
+const MAX_REGISTRATION_ATTEMPTS = 3;
 
 /**
  * Send data to AgentDog API
@@ -19,12 +21,15 @@ async function sendToAgentDog(
   apiKey: string,
   path: string,
   data: Record<string, unknown>,
-  logger?: { warn: (msg: string) => void }
+  logger?: { info?: (msg: string) => void; warn?: (msg: string) => void; error?: (msg: string) => void }
 ): Promise<unknown> {
   if (!apiKey) return null;
 
   try {
-    const response = await fetch(`${endpoint}${path}`, {
+    const url = `${endpoint}${path}`;
+    logger?.info?.(`[agentdog] POST ${path}`);
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -34,13 +39,14 @@ async function sendToAgentDog(
     });
 
     if (!response.ok) {
-      logger?.warn(`[agentdog] API error: ${response.status}`);
+      const text = await response.text().catch(() => '');
+      logger?.warn?.(`[agentdog] API error ${response.status}: ${text.substring(0, 200)}`);
       return null;
     }
 
     return await response.json();
   } catch (error) {
-    logger?.warn(`[agentdog] Failed to send: ${String(error)}`);
+    logger?.error?.(`[agentdog] Request failed: ${String(error)}`);
     return null;
   }
 }
@@ -93,11 +99,23 @@ export default function register(api: any) {
     return;
   }
 
-  api.logger?.info?.('[agentdog] Initializing...');
+  api.logger?.info?.('[agentdog] Initializing with endpoint: ' + endpoint);
 
-  // Helper to register agent
-  const registerAgent = async () => {
-    // Use configured name, or fallback to 'clawdbot'
+  // Helper to register agent with retry
+  const registerAgent = async (): Promise<boolean> => {
+    if (agentId) {
+      api.logger?.info?.(`[agentdog] Already registered: ${agentId}`);
+      return true;
+    }
+
+    if (registrationAttempts >= MAX_REGISTRATION_ATTEMPTS) {
+      api.logger?.warn?.(`[agentdog] Max registration attempts (${MAX_REGISTRATION_ATTEMPTS}) reached`);
+      return false;
+    }
+
+    registrationAttempts++;
+    api.logger?.info?.(`[agentdog] Registration attempt ${registrationAttempts}/${MAX_REGISTRATION_ATTEMPTS}`);
+
     const agentName = cfg.agentName || 'clawdbot';
     const result = await sendToAgentDog(endpoint, apiKey, '/agents/register', {
       name: agentName,
@@ -109,13 +127,23 @@ export default function register(api: any) {
 
     if (result?.agent_id) {
       agentId = result.agent_id;
-      api.logger?.info?.(`[agentdog] Registered: ${agentId}`);
+      api.logger?.info?.(`[agentdog] ✓ Registered successfully: ${agentId}`);
+      return true;
+    } else {
+      api.logger?.warn?.('[agentdog] Registration failed - no agent_id returned');
+      return false;
     }
+  };
+
+  // Ensure registered before sending events (lazy registration fallback)
+  const ensureRegistered = async (): Promise<boolean> => {
+    if (agentId) return true;
+    return await registerAgent();
   };
 
   // Helper to sync config
   const syncConfig = async () => {
-    if (!agentId) return;
+    if (!await ensureRegistered()) return;
 
     api.logger?.info?.('[agentdog] Syncing config...');
     
@@ -135,22 +163,18 @@ export default function register(api: any) {
         heartbeat: config?.agents?.defaults?.heartbeat,
         compaction: config?.agents?.defaults?.compaction,
       },
-      // Cron jobs from config
       crons: config?.crons?.jobs?.map((job: any) => ({
         id: job.id,
         schedule: job.schedule,
-        text: job.text?.substring(0, 100), // Truncate
+        text: job.text?.substring(0, 100),
         enabled: job.enabled !== false,
       })) || [],
-      // Skills
       skills: config?.skills?.available?.map((skill: any) => ({
         name: skill.name,
         description: skill.description,
         location: skill.location,
       })) || [],
-      // Tools available
       tools: config?.tools?.available || [],
-      // Nodes (connected devices)
       nodes: config?.nodes?.registered?.map((node: any) => ({
         id: node.id,
         name: node.name,
@@ -158,16 +182,14 @@ export default function register(api: any) {
         lastSeen: node.lastSeen,
         status: node.status,
       })) || [],
-      // Gateway stats
       gateway_stats: {
         uptime_seconds: gatewayStartTime 
           ? Math.floor((Date.now() - gatewayStartTime.getTime()) / 1000)
           : null,
         started_at: gatewayStartTime?.toISOString(),
         error_count: errorCount,
-        recent_errors: recentErrors.slice(-10), // Last 10 errors
+        recent_errors: recentErrors.slice(-10),
       },
-      // Memory plugin stats (if available)
       memory: config?.plugins?.entries?.memory ? {
         enabled: true,
         workspace: config?.agents?.defaults?.workspace,
@@ -177,7 +199,7 @@ export default function register(api: any) {
 
   // Helper to send events
   const sendEvent = async (type: string, sessionKey: string | undefined, data: Record<string, unknown>) => {
-    if (!agentId) return;
+    if (!await ensureRegistered()) return;
 
     await sendToAgentDog(endpoint, apiKey, '/events', {
       agent_id: agentId,
@@ -190,10 +212,11 @@ export default function register(api: any) {
 
   // 1. Sync on startup
   api.on('gateway_start', async () => {
-    api.logger?.info?.('[agentdog] Gateway started');
+    api.logger?.info?.('[agentdog] Gateway start event received');
     gatewayStartTime = new Date();
     errorCount = 0;
     recentErrors = [];
+    registrationAttempts = 0; // Reset attempts on fresh start
     
     await registerAgent();
     await syncConfig();
@@ -205,9 +228,16 @@ export default function register(api: any) {
     }, syncInterval);
   });
 
-  // 2. Sync on heartbeat
+  // 2. Sync on heartbeat (also acts as fallback registration)
   api.on('heartbeat', async () => {
-    api.logger?.info?.('[agentdog] Heartbeat sync');
+    api.logger?.info?.('[agentdog] Heartbeat event');
+    
+    // Fallback: if not registered yet, try now
+    if (!agentId) {
+      api.logger?.info?.('[agentdog] Not registered yet, attempting registration on heartbeat');
+      gatewayStartTime = gatewayStartTime || new Date();
+    }
+    
     await syncConfig();
   });
 
@@ -237,7 +267,6 @@ export default function register(api: any) {
 
   // 5. Track tool calls
   api.on('after_tool_call', async (event: any) => {
-    // Track errors
     if (event.isError) {
       errorCount++;
       recentErrors.push({
@@ -245,7 +274,6 @@ export default function register(api: any) {
         message: event.errorMessage || 'Tool error',
         tool: event.toolName,
       });
-      // Keep only last 50 errors in memory
       if (recentErrors.length > 50) recentErrors.shift();
     }
     
@@ -270,10 +298,29 @@ export default function register(api: any) {
     }
   });
 
-  api.logger?.info?.('[agentdog] Plugin initialized');
+  // 7. Initial registration attempt (don't wait for gateway_start)
+  // This handles cases where gateway_start already fired before plugin loaded
+  setTimeout(async () => {
+    if (!agentId) {
+      api.logger?.info?.('[agentdog] Delayed init: attempting registration');
+      gatewayStartTime = gatewayStartTime || new Date();
+      await registerAgent();
+      if (agentId) {
+        await syncConfig();
+        // Set up periodic sync if not already
+        if (!syncIntervalId) {
+          syncIntervalId = setInterval(() => {
+            syncConfig();
+          }, syncInterval);
+        }
+      }
+    }
+  }, 5000); // 5 second delay to let gateway fully initialize
+
+  api.logger?.info?.('[agentdog] Plugin registered, waiting for events');
 }
 
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.4.0';
+export const version = '0.5.0';
