@@ -26,10 +26,7 @@ async function sendToAgentDog(
   if (!apiKey) return null;
 
   try {
-    const url = `${endpoint}${path}`;
-    logger?.info?.(`[agentdog] POST ${path}`);
-    
-    const response = await fetch(url, {
+    const response = await fetch(`${endpoint}${path}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -230,14 +227,10 @@ export default function register(api: any) {
 
   // 2. Sync on heartbeat (also acts as fallback registration)
   api.on('heartbeat', async () => {
-    api.logger?.info?.('[agentdog] Heartbeat event');
-    
-    // Fallback: if not registered yet, try now
     if (!agentId) {
-      api.logger?.info?.('[agentdog] Not registered yet, attempting registration on heartbeat');
+      api.logger?.info?.('[agentdog] Heartbeat: not registered, will attempt');
       gatewayStartTime = gatewayStartTime || new Date();
     }
-    
     await syncConfig();
   });
 
@@ -274,7 +267,7 @@ export default function register(api: any) {
         message: event.errorMessage || 'Tool error',
         tool: event.toolName,
       });
-      if (recentErrors.length > 50) recentErrors.shift();
+      if (recentErrors.length > 10) recentErrors.shift();
     }
     
     await sendEvent('tool_call', event.sessionKey, {
@@ -323,4 +316,4 @@ export default function register(api: any) {
 // Export plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.5.0';
+export const version = '0.5.1';
