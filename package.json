@@ -1,7 +1,7 @@
 {
-  "name": "@agentdog/clawdbot",
-  "version": "0.5.1",
-  "description": "AgentDog observability plugin for Clawdbot - monitor your AI agents",
+  "name": "@agentdog/openclaw",
+  "version": "0.6.0",
+  "description": "AgentDog observability plugin for OpenClaw - monitor your AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -10,8 +10,8 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "clawdbot",
-    "clawdbot-plugin",
+    "openclaw",
+    "openclaw-plugin",
     "agentdog",
     "observability",
     "monitoring",
@@ -23,21 +23,21 @@
   "homepage": "https://agentdog.io",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rohit121/clawdbot-plugin.git"
+    "url": "https://github.com/rohit121/openclaw-plugin.git"
   },
   "bugs": {
-    "url": "https://github.com/rohit121/clawdbot-plugin/issues"
+    "url": "https://github.com/rohit121/openclaw-plugin/issues"
   },
   "devDependencies": {
     "typescript": "^5.3.0",
     "@types/node": "^20.0.0"
   },
   "peerDependencies": {
-    "clawdbot": ">=2026.1.0"
+    "openclaw": ">=2026.1.0"
   },
   "files": [
     "dist",
-    "clawdbot.plugin.json",
+    "openclaw.plugin.json",
     "README.md",
     "LICENSE"
   ],

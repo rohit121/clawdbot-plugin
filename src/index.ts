@@ -1,5 +1,5 @@
 /**
- * AgentDog Plugin for Clawdbot
+ * AgentDog Plugin for OpenClaw
  * 
  * Sends observability data to AgentDog.
  */
@@ -136,10 +136,10 @@ export default function register(api: any) {
     registrationAttempts++;
     api.logger?.info?.(`[agentdog] Registration attempt ${registrationAttempts}/${MAX_REGISTRATION_ATTEMPTS}`);
 
-    const agentName = cfg.agentName || 'clawdbot';
+    const agentName = cfg.agentName || 'openclaw';
     const result = await sendToAgentDog(endpoint, apiKey, '/agents/register', {
       name: agentName,
-      type: 'clawdbot',
+      type: 'openclaw',
       metadata: {
         workspace: api.config?.agents?.defaults?.workspace,
       },
