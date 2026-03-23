@@ -8,12 +8,12 @@ Monitor your [OpenClaw](https://openclaw.ai) agents with [AgentDog](https://agen
 
 **1. Install**
 ```bash
-npm install -g @agentdog/openclaw
+openclaw plugins install @agentdog/openclaw
 ```
 
 **2. Get an API key** at [agentdog.io/settings](https://agentdog.io/settings)
 
-**3. Add to `openclaw.yaml`**
+**3. Add to your OpenClaw config**
 ```yaml
 plugins:
   entries:
@@ -23,6 +23,28 @@ plugins:
 ```
 
 **4. Restart your agent** — done! Check the [dashboard](https://agentdog.io).
+
+---
+
+## Upgrading
+
+OpenClaw requires a delete before reinstall:
+
+```bash
+openclaw plugins remove agentdog && openclaw plugins install @agentdog/openclaw
+```
+
+If `plugins remove` is unavailable on your version:
+
+```bash
+rm -rf ~/.openclaw/extensions/agentdog && openclaw plugins install @agentdog/openclaw
+```
+
+If you have a stale copy from an older OpenClaw install, remove it first:
+
+```bash
+rm -rf ~/.openclaw/plugins/agentdog
+```
 
 ---
 
