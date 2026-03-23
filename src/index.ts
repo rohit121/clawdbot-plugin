@@ -12,6 +12,7 @@
 
 // Interactive button namespace — callback_data format: "agentdog-approval:<approvalId>:<decision>"
 const INTERACTIVE_NAMESPACE = 'agentdog-approval';
+const STOP_NAMESPACE = 'agentdog-stop';
 
 // ─── Plugin state ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,37 @@ const pendingApprovals = new Map<string, {
   toolName: string;
   expires: number;
 }>();
+
+// Emergency stop — maps sessionKey → true when user has hit the stop button.
+// Blocks all subsequent tool calls until cleared.
+const emergencyStops = new Map<string, { stoppedAt: number }>();
+
+// How long a stop lasts before auto-clearing (5 minutes)
+const EMERGENCY_STOP_TTL_MS = 5 * 60 * 1000;
+
+// Tool activity tracker — one status message per agent turn, edited as tools progress.
+// Maps sessionKey → { messageRef, steps, startedAt, editFn }
+interface ToolStep {
+  tool: string;
+  summary: string;
+  startedAt: number;
+  durationMs?: number;
+  status: 'running' | 'done' | 'error' | 'blocked';
+}
+
+interface ActivityTracker {
+  steps: ToolStep[];
+  messageRef: unknown;    // Opaque ref for editing the message
+  editFn: ((text: string, opts?: any) => Promise<unknown>) | null;
+  sessionKey: string;
+  turnStartedAt: number;
+  slowTimer: ReturnType<typeof setTimeout> | null;  // Delayed send for fast tools
+}
+
+const activityTrackers = new Map<string, ActivityTracker>();
+
+// Only show status message if a tool takes longer than this
+const SLOW_TOOL_THRESHOLD_MS = 3000;
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -362,6 +394,177 @@ export default function register(api: any) {
     api.logger?.info?.('[agentdog] Interactive approval handlers registered');
   }
 
+  // ── Emergency stop button handler ───────────────────────────────────────
+
+  /**
+   * Handle stop/resume button clicks.
+   * Callback data: "agentdog-stop:stop:<sessionKey>" or "agentdog-stop:resume:<sessionKey>"
+   */
+  const handleStopButton = async (event: any) => {
+    const payload: string = event.callback?.payload || '';
+    const sepIdx = payload.indexOf(':');
+    if (sepIdx < 0) return;
+
+    const action = payload.slice(0, sepIdx);   // "stop" or "resume"
+    const sessionKey = payload.slice(sepIdx + 1) || 'agent:main:main';
+
+    if (action === 'stop') {
+      emergencyStops.set(sessionKey, { stoppedAt: Date.now() });
+      api.logger?.info?.(`[agentdog] 🛑 Emergency stop activated for ${sessionKey}`);
+
+      try {
+        await event.respond?.editMessage?.({
+          text: '🛑 *Agent stopped*\n\nAll tool calls are blocked until you resume.',
+          buttons: [[
+            { text: '▶️ Resume', callback_data: `${STOP_NAMESPACE}:resume:${sessionKey}` },
+          ]],
+        });
+      } catch {
+        try { await event.respond?.clearButtons?.(); } catch {}
+      }
+    } else if (action === 'resume') {
+      emergencyStops.delete(sessionKey);
+      api.logger?.info?.(`[agentdog] ▶️ Emergency stop cleared for ${sessionKey}`);
+
+      try {
+        await event.respond?.editMessage?.({
+          text: '▶️ *Agent resumed*\n\nTool calls are allowed again.',
+        });
+      } catch {
+        try { await event.respond?.clearButtons?.(); } catch {}
+      }
+    }
+  };
+
+  if (api.registerInteractiveHandler) {
+    for (const channel of ['telegram', 'slack', 'discord'] as const) {
+      api.registerInteractiveHandler({
+        namespace: STOP_NAMESPACE,
+        channel,
+        handler: handleStopButton,
+      });
+    }
+  }
+
+  /**
+   * Send a stop button to the user. Called when an approval-blocked tool
+   * is detected, giving the user a way to halt the entire session.
+   */
+  const sendStopButton = async (sessionKey: string | undefined) => {
+    const origin = resolveOrigin(sessionKey);
+    if (!origin) return;
+
+    const { channel, peerId } = origin;
+    const sk = sessionKey || 'agent:main:main';
+
+    const buttons = [[
+      { text: '🛑 Stop Agent', callback_data: `${STOP_NAMESPACE}:stop:${sk}` },
+    ]];
+
+    try {
+      const runtime = api.runtime;
+      if (!runtime?.channel) return;
+
+      const senders: Record<string, () => Promise<void>> = {
+        telegram: () => runtime.channel.telegram?.sendMessageTelegram(peerId, '🛑 Tap to stop all agent actions:', { buttons }),
+        slack: () => runtime.channel.slack?.sendMessageSlack(peerId, '🛑 Tap to stop all agent actions:', { buttons }),
+        discord: () => runtime.channel.discord?.sendMessageDiscord(peerId, '🛑 Tap to stop all agent actions:', { buttons }),
+      };
+
+      const send = senders[channel];
+      if (send) await send();
+    } catch {}
+  };
+
+  // ── Activity tracker helpers ─────────────────────────────────────────────
+
+  function formatActivityMessage(tracker: ActivityTracker): string {
+    const lines: string[] = [];
+    for (const step of tracker.steps) {
+      const icon = step.status === 'running' ? '⏳'
+        : step.status === 'done' ? '✅'
+        : step.status === 'error' ? '❌'
+        : '⚠️';
+      const duration = step.durationMs != null ? ` (${(step.durationMs / 1000).toFixed(1)}s)` : '';
+      lines.push(`${icon} \`${step.tool}\` — ${step.summary}${duration}`);
+    }
+    return lines.join('\n');
+  }
+
+  async function sendOrUpdateActivity(sessionKey: string) {
+    const tracker = activityTrackers.get(sessionKey);
+    if (!tracker || tracker.steps.length === 0) return;
+
+    const text = formatActivityMessage(tracker);
+    const origin = resolveOrigin(sessionKey);
+    if (!origin) return;
+
+    const { channel, peerId } = origin;
+    const sk = sessionKey || 'agent:main:main';
+    const stopButton = [{ text: '🛑 Stop', callback_data: `${STOP_NAMESPACE}:stop:${sk}` }];
+
+    const hasRunning = tracker.steps.some((s) => s.status === 'running');
+    const buttons = hasRunning ? [stopButton] : undefined;
+
+    try {
+      const runtime = api.runtime;
+      if (!runtime?.channel) return;
+
+      // Try to edit existing message first
+      if (tracker.editFn) {
+        await tracker.editFn(text, buttons ? { buttons } : undefined);
+        return;
+      }
+
+      // Send new message and capture edit function
+      // We need to use sendMessageTelegram which returns the sent message,
+      // but the plugin API doesn't give us an edit handle directly.
+      // Instead, we'll send a new message each time (first time only).
+      const senders: Record<string, () => Promise<unknown>> = {
+        telegram: () => runtime.channel.telegram?.sendMessageTelegram(peerId, text, { buttons }),
+        slack: () => runtime.channel.slack?.sendMessageSlack(peerId, text, { buttons }),
+        discord: () => runtime.channel.discord?.sendMessageDiscord(peerId, text, { buttons }),
+      };
+
+      const send = senders[channel];
+      if (send) await send();
+    } catch {}
+  }
+
+  function getOrCreateTracker(sessionKey: string): ActivityTracker {
+    const key = sessionKey || 'agent:main:main';
+    let tracker = activityTrackers.get(key);
+    if (!tracker) {
+      tracker = {
+        steps: [],
+        messageRef: null,
+        editFn: null,
+        sessionKey: key,
+        turnStartedAt: Date.now(),
+        slowTimer: null,
+      };
+      activityTrackers.set(key, tracker);
+    }
+    return tracker;
+  }
+
+  function summarizeToolCall(toolName: string, params: Record<string, unknown>): string {
+    if (toolName === 'exec') {
+      const cmd = String(params.command || '').trim();
+      return cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd || 'command';
+    }
+    if (toolName === 'read' || toolName === 'write') {
+      return String(params.path || params.file_path || '').split('/').pop() || toolName;
+    }
+    if (toolName === 'web_search') {
+      return String(params.query || '').slice(0, 50) || 'search';
+    }
+    if (toolName === 'web_fetch') {
+      return String(params.url || '').slice(0, 50) || 'fetch';
+    }
+    return toolName;
+  }
+
   // ── Lifecycle events ────────────────────────────────────────────────────
 
   api.on('gateway_start', async () => {
@@ -405,6 +608,16 @@ export default function register(api: any) {
       sessionOrigins.set(sessionKey, origin);
       sessionOrigins.set('agent:main:main', origin);
     }
+
+    // Auto-clear emergency stop when user sends a new message (implicit resume)
+    emergencyStops.delete(sessionKey);
+    emergencyStops.delete('agent:main:main');
+
+    // Clear activity tracker for new turn
+    const prevTracker = activityTrackers.get(sessionKey);
+    if (prevTracker?.slowTimer) clearTimeout(prevTracker.slowTimer);
+    activityTrackers.delete(sessionKey);
+    activityTrackers.delete('agent:main:main');
 
     clearTraceId(event.sessionKey);
     const traceId = getOrCreateTraceId(event.sessionKey);
@@ -453,6 +666,25 @@ export default function register(api: any) {
       if (recentErrors.length > 10) recentErrors.shift();
     }
 
+    // Update activity tracker
+    const sk = event.sessionKey || 'agent:main:main';
+    const tracker = activityTrackers.get(sk);
+    if (tracker) {
+      // Find the last running step for this tool
+      const step = [...tracker.steps].reverse().find(
+        (s) => s.tool === event.toolName && s.status === 'running'
+      );
+      if (step) {
+        step.status = event.isError ? 'error' : 'done';
+        step.durationMs = event.durationMs || event.duration || (Date.now() - step.startedAt);
+      }
+
+      // If the status message was already sent (slow timer fired), update it
+      if (!tracker.slowTimer) {
+        sendOrUpdateActivity(sk).catch(() => {});
+      }
+    }
+
     await sendEvent('tool_call', event.sessionKey, {
       trace_id: traceId,
       name: event.toolName,
@@ -476,12 +708,41 @@ export default function register(api: any) {
    *   the agent to retry.
    */
   api.on('before_tool_call', async (event: any, ctx: any) => {
-    if (!permissionsEnabled) return;
-    if (!await ensureRegistered()) return;
+    // Check emergency stop first (even if permissions are disabled)
+    const sessionKey: string | undefined = ctx.sessionKey;
+    const stop = emergencyStops.get(sessionKey || 'agent:main:main');
+    if (stop) {
+      // Auto-expire after TTL
+      if (Date.now() - stop.stoppedAt > EMERGENCY_STOP_TTL_MS) {
+        emergencyStops.delete(sessionKey || 'agent:main:main');
+      } else {
+        return { block: true, blockReason: '🛑 Agent is stopped. The user tapped the stop button. Wait for them to resume or send a new message.' };
+      }
+    }
 
     const toolName: string = event.toolName || ctx.toolName;
     const params: Record<string, unknown> = event.params || {};
-    const sessionKey: string | undefined = ctx.sessionKey;
+
+    // Track this tool call for the activity status message
+    const tracker = getOrCreateTracker(sessionKey || 'agent:main:main');
+    const step: ToolStep = {
+      tool: toolName,
+      summary: summarizeToolCall(toolName, params),
+      startedAt: Date.now(),
+      status: 'running',
+    };
+    tracker.steps.push(step);
+
+    // Delayed send: only show status if tool takes >3s
+    if (!tracker.slowTimer) {
+      tracker.slowTimer = setTimeout(() => {
+        tracker.slowTimer = null;
+        sendOrUpdateActivity(sessionKey || 'agent:main:main').catch(() => {});
+      }, SLOW_TOOL_THRESHOLD_MS);
+    }
+
+    if (!permissionsEnabled) return;
+    if (!await ensureRegistered()) return;
 
     const result = await sendToAgentDog(
       endpoint, apiKey,
@@ -514,6 +775,9 @@ export default function register(api: any) {
 
       // Send inline buttons (fire-and-forget, non-blocking)
       notifyChannelApproval(toolName, params, approvalId, sessionKey).catch(() => {});
+
+      // Also send a stop button so user can halt further tool calls
+      sendStopButton(sessionKey).catch(() => {});
 
       return {
         block: true,
