@@ -8,11 +8,11 @@ Monitor your [OpenClaw](https://openclaw.ai) agents with [AgentDog](https://agen
 
 AI agents are powerful — but **you need to stay in control**. AgentDog gives you:
 
-- **See everything** — every message, tool call, and cost in real-time
-- **Set boundaries** — allow, block, or require approval for any tool
-- **Stay in the loop** — approve dangerous actions with one tap, right in Telegram/Discord/Slack
-- **Stop anytime** — emergency stop button halts all agent actions instantly
-- **Know what's happening** — live activity tracker shows what your agent is doing right now
+- **🔍 See everything** — every message, tool call, and cost in real-time
+- **🛡️ Set boundaries** — allow, block, or require approval for any tool
+- **✅ Stay in the loop** — approve dangerous actions with one tap, right in chat
+- **⏳ Know what's happening** — live activity feed shows every step as it runs
+- **🛑 Stop anytime** — one tap halts all agent actions instantly
 
 ## Setup
 
@@ -28,27 +28,69 @@ npm install -g @agentdog/openclaw
 extensions:
   agentdog:
     apiKey: YOUR_API_KEY
-    permissionsEnabled: true  # enable permission controls
+    permissionsEnabled: true
 ```
 
-**4. Restart your agent** — done! Check the [dashboard](https://agentdog.io).
+**4. Restart your agent** — done!
 
 ---
 
-## Features
+## In-Chat Observability
 
-### 📊 Observability
+### ⏳ Live Activity Feed
 
-| What's tracked | Details |
-|----------------|---------|
-| Messages | Role, channel, model, content |
-| Tool calls | Name, arguments, duration, success/error |
-| Usage & costs | Tokens in/out, cost per turn |
-| Config | Channels, plugins, skills, crons |
+Every tool call your agent makes shows up in a **single, auto-updating message** — right in your chat:
 
-No secrets or API keys are ever sent.
+```
+⏳ exec — git pull origin main...
+[🛑 Stop]
+```
 
-### 🛡️ Permission Controls
+As the agent works through multiple steps, the message builds up in real-time:
+
+```
+✅ exec — git pull origin main (2.1s)
+✅ exec — npm run build (12.4s)
+⏳ exec — docker-compose up...
+[🛑 Stop]
+```
+
+When the turn completes, you get a summary:
+
+```
+✅ exec — git pull origin main (2.1s)
+✅ exec — npm run build (12.4s)
+✅ exec — docker-compose up (8.3s)
+
+📊 3 tools · 22.8s total
+```
+
+- **One message, always updating** — no spam, no clutter
+- **Every step visible** — know exactly what your agent is doing
+- **Timing for each step** — spot slow operations instantly
+- **Error tracking** — failed steps show ❌ with error counts in the summary
+
+### 🛑 Emergency Stop
+
+The stop button is always there while the agent is working. One tap and:
+
+```
+🛑 Agent stopped
+All tool calls are blocked until you resume.
+
+[▶️ Resume]
+```
+
+- **Blocks all subsequent tool calls** — the agent can't do anything until you say so
+- **Resume when ready** — tap ▶️ or just send a new message
+- **Auto-expires** after 5 minutes (safety net)
+- **No data loss** — conversations and context are preserved
+
+---
+
+## Permission Controls
+
+### 🛡️ Tool-Level Rules
 
 Set rules for any tool in the [dashboard](https://agentdog.io/permissions):
 
@@ -56,13 +98,13 @@ Set rules for any tool in the [dashboard](https://agentdog.io/permissions):
 - **Block** — tool is always prevented
 - **Ask me** — agent pauses and sends you approve/deny buttons
 
-Rules support exact names (`send_email`), wildcards (`github.*`), or catch-all (`*`). Scope them to a specific agent or apply globally.
+Rules support exact names (`send_email`), wildcards (`github.*`), or catch-all (`*`). Scope them per-agent or globally.
 
-**Bulk rule creation:** Select multiple capabilities at once and set permissions in a single click.
+**Bulk rule creation:** Select multiple capabilities and set permissions in one click.
 
 ### ✅ Inline Approval Buttons
 
-When a tool needs approval, you get **inline buttons** right in your chat:
+When a tool needs approval:
 
 ```
 ⚠️ Approval needed
@@ -73,62 +115,51 @@ Your agent wants to run: exec
 [✅ Approve]  [❌ Deny]
 ```
 
-Tap a button — the message updates to show your decision. The agent can continue chatting while waiting.
-
-**Text fallback:** Reply `approve` or `deny` if buttons aren't available.
-
-### ⏳ Live Activity Tracker
-
-See what your agent is doing in real-time:
-
-```
-⏳ exec — git pull origin main...
-```
-↓ (updates automatically)
-```
-✅ exec — git pull origin main (2.1s)
-⏳ exec — npm run build...
-```
-
-Only appears for tools that take >3 seconds — fast operations stay silent.
-
-### 🛑 Emergency Stop
-
-Tap the **Stop** button to immediately block all subsequent tool calls:
-
-```
-🛑 Agent stopped
-All tool calls are blocked until you resume.
-
-[▶️ Resume]
-```
-
-- Blocks all tool calls until you resume or send a new message
-- Auto-expires after 5 minutes
-- No data loss — the agent just can't run tools
+- **Non-blocking** — the agent continues chatting while you decide
+- **One-tap** — tap a button, message updates to show your choice
+- **Text fallback** — reply `approve` or `deny` if buttons aren't available
+- **10-minute expiry** — auto-denies if no response
 
 ### 🔍 Smart CLI Mapping
 
-AgentDog automatically recognizes CLI tools and maps them to apps:
+AgentDog automatically maps CLI commands to apps for smarter rules:
 
-- `exec("gh pr merge")` → matches `github.pr.merge` rules
-- `exec("git push")` → matches `github.push` rules  
-- `exec("docker run nginx")` → matches `docker.run` rules
-- `exec("kubectl apply -f ...")` → matches `kubectl.apply` rules
+| Command | Maps to | Rule matches |
+|---------|---------|--------------|
+| `git push` | `github.push` | `github.*`, `github.push` |
+| `gh pr merge` | `github.pr.merge` | `github.*`, `github.pr.*` |
+| `docker run nginx` | `docker.run` | `docker.*`, `docker.run` |
+| `kubectl apply` | `kubectl.apply` | `kubectl.*`, `kubectl.apply` |
 
-**Auto-discovery:** Unknown CLI tools are automatically detected, and their capabilities are populated from public documentation (tldr-pages).
+**Auto-discovery:** Unknown CLI tools are automatically detected and their capabilities populated from public documentation.
+
+---
+
+## Dashboard Observability
+
+The [AgentDog dashboard](https://agentdog.io) gives you the full picture:
+
+| What's tracked | Details |
+|----------------|---------|
+| Messages | Role, channel, model, content |
+| Tool calls | Name, arguments, duration, success/error |
+| Usage & costs | Tokens in/out, cost per turn |
+| Config | Channels, plugins, skills, crons |
+| Sessions | Full conversation history with replay |
+
+No secrets or API keys are ever sent.
 
 ---
 
 ## Supported Channels
 
-Inline buttons, activity tracking, and stop controls work on:
+All features work on:
 
 - **Telegram** ✅
 - **Discord** ✅
 - **Slack** ✅
 
-Other channels fall back to text-based approve/deny or the AgentDog dashboard.
+Other channels fall back to text-based interactions or the dashboard.
 
 ---
 
