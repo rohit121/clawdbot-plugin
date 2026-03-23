@@ -479,15 +479,26 @@ export default function register(api: any) {
   // ── Activity tracker helpers ─────────────────────────────────────────────
 
   function formatActivityMessage(tracker: ActivityTracker): string {
-    // Only show the latest step
-    const step = tracker.steps[tracker.steps.length - 1];
-    if (!step) return '';
-    const icon = step.status === 'running' ? '⏳'
-      : step.status === 'done' ? '✅'
-      : step.status === 'error' ? '❌'
-      : '⚠️';
-    const duration = step.durationMs != null ? ` (${(step.durationMs / 1000).toFixed(1)}s)` : '';
-    return `${icon} \`${step.tool}\` — ${step.summary}${duration}`;
+    const lines: string[] = [];
+    for (const step of tracker.steps) {
+      const icon = step.status === 'running' ? '⏳'
+        : step.status === 'done' ? '✅'
+        : step.status === 'error' ? '❌'
+        : '⚠️';
+      const duration = step.durationMs != null ? ` (${(step.durationMs / 1000).toFixed(1)}s)` : '';
+      lines.push(`${icon} \`${step.tool}\` — ${step.summary}${duration}`);
+    }
+
+    // Add summary line when turn is complete (nothing running)
+    const hasRunning = tracker.steps.some((s) => s.status === 'running');
+    if (!hasRunning && tracker.steps.length > 1) {
+      const totalMs = tracker.steps.reduce((sum, s) => sum + (s.durationMs || 0), 0);
+      const errors = tracker.steps.filter((s) => s.status === 'error').length;
+      const errStr = errors > 0 ? ` · ${errors} failed` : '';
+      lines.push(`\n📊 ${tracker.steps.length} tools · ${(totalMs / 1000).toFixed(1)}s total${errStr}`);
+    }
+
+    return lines.join('\n');
   }
 
   async function sendOrUpdateActivity(sessionKey: string) {
@@ -733,13 +744,8 @@ export default function register(api: any) {
     };
     tracker.steps.push(step);
 
-    // Delayed send: only show status if tool takes >3s
-    if (!tracker.slowTimer) {
-      tracker.slowTimer = setTimeout(() => {
-        tracker.slowTimer = null;
-        sendOrUpdateActivity(sessionKey || 'agent:main:main').catch(() => {});
-      }, SLOW_TOOL_THRESHOLD_MS);
-    }
+    // Send/update the status message immediately
+    sendOrUpdateActivity(sessionKey || 'agent:main:main').catch(() => {});
 
     if (!permissionsEnabled) return;
     if (!await ensureRegistered()) return;
@@ -869,4 +875,4 @@ export default function register(api: any) {
 // Plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.10.1';
+export const version = '0.10.2';
