@@ -620,9 +620,8 @@ export default function register(api: any) {
       sessionOrigins.set('agent:main:main', origin);
     }
 
-    // Auto-clear emergency stop when user sends a new message (implicit resume)
-    emergencyStops.delete(sessionKey);
-    emergencyStops.delete('agent:main:main');
+    // Don't auto-clear emergency stop on message — only clear via Resume button.
+    // The user might be sending a follow-up message while the stop is active.
 
     // Clear activity tracker for new turn
     const prevTracker = activityTrackers.get(sessionKey);
@@ -875,4 +874,4 @@ export default function register(api: any) {
 // Plugin metadata
 export const id = 'agentdog';
 export const name = 'AgentDog';
-export const version = '0.10.3';
+export const version = '0.10.4';
